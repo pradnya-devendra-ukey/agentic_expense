@@ -61,7 +61,48 @@ def executor_node(state: AgentState) -> Dict[str, Any]:
                 upsert_budget(user_id, category, amount, period)
                 res = json.dumps({"status": "success", "message": f"Set {period} budget for {category} to {amount}"})
                 tool_results.append((current_step, res))
-                response_texts.append(res)
+                
+                # Generate a conversational friendly response instead of returning the raw JSON
+                try:
+                    from openai import OpenAI
+                    client = OpenAI(api_key=OPENAI_API_KEY)
+                    system_prompt = (
+                        "You are a helpful, extremely engaging financial assistant. "
+                        "The user has just set or modified a budget. "
+                        "Acknowledge the budget change in a friendly, conversational manner. "
+                        "Use Markdown to highlight the amount, category, and period. "
+                        "Sprinkle 1-2 relevant emojis (like 🍕, 🚗, 💰) to make it feel alive.\n"
+                        "Do not expose any raw JSON or status messages."
+                    )
+                    formatted_history = []
+                    for msg in history:
+                        if isinstance(msg, dict):
+                            formatted_history.append(msg)
+                        elif hasattr(msg, "content"):
+                            role = "assistant"
+                            if hasattr(msg, "type"):
+                                if msg.type == "human":
+                                    role = "user"
+                                elif msg.type == "system":
+                                    role = "system"
+                            formatted_history.append({"role": role, "content": msg.content})
+                    
+                    messages = [{"role": "system", "content": system_prompt}]
+                    if formatted_history:
+                        messages.extend(formatted_history)
+                    messages.append({"role": "user", "content": input_text})
+                    messages.append({"role": "system", "content": f"Operation result: {res}"})
+                    
+                    completion = client.chat.completions.create(
+                        model=OPENAI_MODEL,
+                        messages=messages,
+                        temperature=0.5
+                    )
+                    friendly_res = completion.choices[0].message.content.strip()
+                    response_texts.append(friendly_res)
+                except Exception as exc:
+                    print(f"Failed to generate friendly budget response: {exc}")
+                    response_texts.append(res)
                 
             elif tool_name == "read_expenses_tool":
                 query = tool_args.get("query")
